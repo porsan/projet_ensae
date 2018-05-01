@@ -227,3 +227,35 @@ infos_acteur <- c(id, id_film, url_film, rep(NA, 160))
 if (traite_real) { return(infos_real) } else { return(infos_acteur) }
 
 }
+
+# Fonction decompose_modalite() permet de decomposer les modalites d'une ou plusieurs variables d'un tableau.
+# la fonction retourne un dataframe avec le meme nombre de lignes que le tableau en argument (table_a_traiter) et le nombre de colonnes des modalites les plus frequentes choisies en argument (nb)
+# Les arguments de la fonction sont :
+# col_a_traiter - le nom de la/ des colonnes a traiter
+# nom_col - prefixe du nom de la/ des colonnes a creer
+# nb - nombre de modalites a conserver. Les nb modalites les plus frequentes seront utilisees
+# table_a_traiter - table a partir de laquelle on lit les donnees
+
+decompose_modalite <- function(col_a_traiter,nom_col,nb,table_a_traiter) {
+  # Construction de la liste des modalites en supprimant les valeurs vides et NA
+  modalites <- unlist(lapply(col_a_traiter, function(x) { table_a_traiter[,x] }))
+  modalites <- modalites[which(modalites != "")]
+  modalites <- modalites[which(!is.na(modalites))]
+  # Comptage de chaque modalité dans une table et tri par ordre decroissant
+  tmp_frequence <- data.frame(sort(table(modalites),decreasing=TRUE))
+  
+  # Construction du tableau decompose par modalite
+  # Pour chacune des nb premieres modalites on construit un vecteur de 0 de longueur egale a la hauteur du tableau. On met 1 a chaque indice du tableau ou la modalite apparait 
+  tmp_table <- unlist(lapply(as.vector(tmp_frequence[1:nb,1]), function(x) 
+    {   indice <- unlist(lapply(col_a_traiter, function(y) { which(table_a_traiter[,y] == as.character(x)) })) # Construction de la liste des indices du tableau ou la modalite apparait
+  
+        tmp_vector <- vector(mode = "numeric",nrow(table_a_traiter)) # Construction du vecteur de 0 de longueur egale a la hauteur du tableau.
+        tmp_vector[indice] <- 1  # On met 1 a chaque indice du tableau ou la modalite apparait 
+        return(tmp_vector)
+    }))
+  # Mise en forme du tableau construit
+  tmp_table <- data.frame(matrix(tmp_table,nrow = nrow(table_a_traiter), ncol = nb))
+  # Mise a jour des noms de colonnes avec le prefixe en argument (nom_col) et le nom de la modalite
+  names(tmp_table) <- paste0(nom_col,"_",tmp_frequence[1:nb,1])
+  return(tmp_table)
+}
