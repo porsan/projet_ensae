@@ -6,6 +6,7 @@ library(rvest)
 #library(httr)
 #library(stringr)
 
+########## Fonction infos_casting() ########## 
 # Fonction infos_casting() permet de recuperer les infos d'une url personne d'allocine
 # Les arguments de la fonction sont :
 # url_fiche - url sur laquelle on va recuperer les infos  
@@ -15,7 +16,6 @@ library(rvest)
 # sauvegarde - enregistrement des sauvegardes des fichiers html et jpg
 
 infos_casting <- function(url_fiche, type_cast = "acteur", indice, data_dir_casting, sauvegarde = FALSE) {
-  
   
   # initialisation des variables par defaut a NA
   id_personne <- url_casting <- pers_nom <- pers_metiers <- pers_metier1 <- pers_metier2 <- pers_metier3 <- pers_nom_naiss <- pers_pseudo <- pers_nat <- pers_nat1 <- pers_nat2 <- pers_naiss <- pers_naiss_date <- pers_naiss_lieu <- pers_age <- pers_deces <- pers_deces_date <- pers_deces_age <- pers_deces_lieu <- pers_an_carriere <- pers_nb_film <- pers_nb_prix <- pers_nb_nominat <- NA
@@ -158,7 +158,7 @@ infos_casting <- function(url_fiche, type_cast = "acteur", indice, data_dir_cast
   return(infos)
 }
 
-
+########## Fonction infos_film() ########## 
 # Fonction infos_film() permet de recuperer les infos d'un film d'allocine
 # Les arguments de la fonction sont :
 # id - id du film avec mois-annee de sortie
@@ -228,6 +228,7 @@ if (traite_real) { return(infos_real) } else { return(infos_acteur) }
 
 }
 
+########## Fonction decompose_modalite() ########## 
 # Fonction decompose_modalite() permet de decomposer les modalites d'une ou plusieurs variables d'un tableau.
 # la fonction retourne un dataframe avec le meme nombre de lignes que le tableau en argument (table_a_traiter) et le nombre de colonnes des modalites les plus frequentes choisies en argument (nb)
 # Les arguments de la fonction sont :
@@ -258,4 +259,30 @@ decompose_modalite <- function(col_a_traiter,nom_col,nb,table_a_traiter) {
   # Mise a jour des noms de colonnes avec le prefixe en argument (nom_col) et le nom de la modalite
   names(tmp_table) <- paste0(nom_col,"_",tmp_frequence[1:nb,1])
   return(tmp_table)
+}
+
+########## Fonction construit_table_final() ##########
+# Fonction construit_table_final() permet de construire la table consolidee des infos Allocine a partir des differentes tables.
+# Les arguments de la fonction sont :
+# data_dir - repertoire pour charger les fichiers csv
+
+construit_table_final <- function(data_dir) {
+  
+  ########## Chargement des tables ########## 
+  principal <- read.csv2(paste0(data_dir,"table_principal.csv"), encoding = "latin1") # Avec specification de l'encodage des caracteres, ici latin1 
+  casting <- read.csv2(paste0(data_dir,"table_casting.csv"), encoding = "latin1")
+  real <- read.csv2(paste0(data_dir,"table_real_1966-2017_v02.csv"))
+  acteurs <- read.csv2(paste0(data_dir,"table_acteur_1966-2017_v02.csv"))
+  notes<- read.csv2(paste0(data_dir,"table_notes.csv"), encoding = "latin1")
+  
+  ########## Consolidation en une seule table ##########
+  
+  notes<- rename(notes,id_film=id_film.x)
+  real$id_film <- as.integer(real$id_film)
+  acteurs$id_film<- as.integer(acteurs$id_film)
+  
+  final<- left_join(principal[!(principal$mois_sortie %in% c("201801","201802","201803")),], casting, "id_film")
+  final<- left_join(final, real, "id_film")
+  final<- left_join(final, acteurs, "id_film")
+  final<- left_join(final, notes[!is.na(notes$id_film),], "id_film")
 }
