@@ -1,10 +1,9 @@
 ########## Librairies - options ##########
 library(RCurl)
 library(rvest)
-
-#library(dplyr)
+library(dplyr)
+library(stringr)
 #library(httr)
-#library(stringr)
 
 ########## Fonction infos_casting() ########## 
 # Fonction infos_casting() permet de recuperer les infos d'une url personne d'allocine
@@ -261,28 +260,154 @@ decompose_modalite <- function(col_a_traiter,nom_col,nb,table_a_traiter) {
   return(tmp_table)
 }
 
+########## Fonction remplace_NA_moyenne() ##########
+# Fonction remplace_NA_moyenne() permet de remplacer les NA par la moyenne sur un vecteur.
+# Les arguments de la fonction sont :
+# x - vecteur a traiter
+
+remplace_NA_moyenne <- function(x) {
+  x[is.na(x)] <- mean(x, na.rm = TRUE)
+  return(x)
+}
+
+
+########## Fonction remplace_NA_0() ##########
+# Fonction remplace_NA_0() permet de remplacer les NA par zero sur un vecteur.
+# Les arguments de la fonction sont :
+# x - vecteur a traiter
+
+remplace_NA_0 <- function(x) {
+  x[is.na(x)] <- 0
+  return(x)
+}
+
+
+########## Fonction traite_table_notes() ##########
+# Fonction traite_table_notes() permet de traiter les donnees de la table des notes des films Allocine.
+# Les arguments de la fonction sont :
+# notes - la table des notes
+
+traite_table_notes <- function(notes) {
+  
+  # table note : on ne garde que l'ID et les notes moyennes
+  # str(notes)
+  notes <- select(notes, c(id_film.x, note_spectateurs_moyenne, note_presse_moyenne))
+  notes <- rename(notes,id_film=id_film.x)
+}
+
+
+########## Fonction traite_table_personnes() ##########
+# Fonction traite_table_personnes() permet de traiter les donnees de la table des personnes du casting des films Allocine.
+# Les arguments de la fonction sont :
+# personnes - la table des personnes
+
+traite_table_personnes <- function(personnes) {
+  
+  # table personnes : supprimer les variables avec trop de NA, et imputer les autres NA avec la moyenne
+  # str(personnes)
+  # sapply(personnes, function(x) sum(is.na(x))) # Nombre de NA pour chacune des variables
+  
+  # Suppression des realisateurs 2 et acteurs > 4
+  var_to_drop <- c(names(personnes)[str_detect(names(personnes), "realisateur2")],
+                   names(personnes)[str_detect(names(personnes), "5")],
+                   names(personnes)[str_detect(names(personnes), "6")],
+                   names(personnes)[str_detect(names(personnes), "7")],
+                   names(personnes)[str_detect(names(personnes), "8")])
+  personnes <- select(personnes, -one_of(var_to_drop))
+  
+  # Remplacer les NA par la moyenne sur les age / ans / nb_films
+  var_NA_to_moyenne <- c(names(personnes)[str_detect(names(personnes), "age")],
+                         names(personnes)[str_detect(names(personnes), "an_carriere")],
+                         names(personnes)[str_detect(names(personnes), "films")])
+  personnes[,var_NA_to_moyenne] <- data.frame(sapply(personnes[,var_NA_to_moyenne], remplace_NA_moyenne))
+  
+  # Remplacer les NA par zero sur les prix / nominations
+  var_NA_to_0 <- c(names(personnes)[str_detect(names(personnes), "prix")],
+                   names(personnes)[str_detect(names(personnes), "nomination")])
+  personnes[,var_NA_to_0] <- data.frame(sapply(personnes[,var_NA_to_0], remplace_NA_0))
+  return(personnes)
+  # str(personnes[,var_NA_to_moyenne])
+  # str(data.frame(sapply(personnes[,var_NA_to_moyenne], remplace_NA_moyenne)))
+  
+}
+
+########## Fonction traite_table_final() ##########
+# Fonction traite_table_final() permet de traiter les donnees de la table final des infos Allocine.
+# Les arguments de la fonction sont :
+# final - la table final
+
+traite_table_final <- function(final) {
+  
+  # Variables a convertir en factor
+  list_var_fact <- c(names(final) %>% str_subset("dist"),
+                     names(final) %>% str_subset("genre"),
+                     names(final) %>% str_subset("nationalite"))
+  
+  # Passage en factors des variables quali 
+  final[,list_var_fact] <- data.frame(sapply(select(final, list_var_fact), factor))
+  
+  # Suppression de l'annee 2018
+  final <- filter(final, annee_sortie != 2018)
+  
+  # Suppression des annees avant 1990
+  final <- filter(final, annee_sortie >= 1990)
+  
+  # Suppression des dernieres lignes a NA
+  final <- filter(final, !is.na(jour_semaine_sortie)) %>% filter(!is.na(saison_sortie)) %>% filter(!is.na(acteur1_age_sortie))
+  
+  # Dernieres Variables a supprimer juste pour la modelisation
+  final <- select(final, -one_of(c("X.x", "X.y", "synopsis", "nb_prix", "nb_nominations", "date_sortie", "annee_sortie")))
+  
+  # Transformation des boolean en factor (necessaire pour gradient boosting)
+  final$reprise <- factor(final$reprise)
+  final$multilingues <- factor(final$multilingues)
+  
+  return(final)
+}
+
 ########## Fonction construit_table_final() ##########
 # Fonction construit_table_final() permet de construire la table consolidee des infos Allocine a partir des differentes tables.
 # Les arguments de la fonction sont :
 # data_dir - repertoire pour charger les fichiers csv
 
 construit_table_final <- function(data_dir) {
+   
+  ########## Chargement des tables ###
+  principal <- read.csv2(paste0(data_dir,"table_principal2.csv"), encoding = "latin1") # Avec specification de l'encodage des caracteres, ici latin1 
+  notes <- read.csv2(paste0(data_dir,"table_notes.csv"), encoding = "latin1")
+  personnes <- read.csv2(paste0(data_dir,"variables_personnes.csv"), encoding = "latin1")
   
-  ########## Chargement des tables ########## 
-  principal <- read.csv2(paste0(data_dir,"table_principal.csv"), encoding = "latin1") # Avec specification de l'encodage des caracteres, ici latin1 
-  casting <- read.csv2(paste0(data_dir,"table_casting.csv"), encoding = "latin1")
-  real <- read.csv2(paste0(data_dir,"table_real_1966-2017_v02.csv"))
-  acteurs <- read.csv2(paste0(data_dir,"table_acteur_1966-2017_v02.csv"))
-  notes<- read.csv2(paste0(data_dir,"table_notes.csv"), encoding = "latin1")
+  ########## Traitement sur la table notes ###
+  notes <- traite_table_notes(notes)
+  ########## Traitement sur la table personnes ###
+  personnes <- traite_table_personnes(personnes)
   
-  ########## Consolidation en une seule table ##########
+  ########## Consolidation en une seule table ###
+  final <- left_join(principal, notes[!is.na(notes$id_film),], "id_film")
+  final <- left_join(final, personnes, "id_film")
   
-  notes<- rename(notes,id_film=id_film.x)
-  real$id_film <- as.integer(real$id_film)
-  acteurs$id_film<- as.integer(acteurs$id_film)
+  ########## Traitement sur la table final ###
+  final <- traite_table_final(final)
+
+  }
   
-  final<- left_join(principal[!(principal$mois_sortie %in% c("201801","201802","201803")),], casting, "id_film")
-  final<- left_join(final, real, "id_film")
-  final<- left_join(final, acteurs, "id_film")
-  final<- left_join(final, notes[!is.na(notes$id_film),], "id_film")
-}
+########## OLD Fonction construit_table_final <- function(data_dir) { ########## 
+#   
+#   ########## Chargement des tables ###
+#   principal <- read.csv2(paste0(data_dir,"table_principal2.csv"), encoding = "latin1") # Avec specification de l'encodage des caracteres, ici latin1 
+#   casting <- read.csv2(paste0(data_dir,"table_casting.csv"), encoding = "latin1")
+#   real <- read.csv2(paste0(data_dir,"table_real_1966-2017_v02.csv"))
+#   acteurs <- read.csv2(paste0(data_dir,"table_acteur_1966-2017_v02.csv"))
+#   notes<- read.csv2(paste0(data_dir,"table_notes.csv"), encoding = "latin1")
+#   
+#   ########## Consolidation en une seule table ###
+#   
+#   notes<- rename(notes,id_film=id_film.x)
+#   real$id_film <- as.integer(real$id_film)
+#   acteurs$id_film<- as.integer(acteurs$id_film)
+#   
+#   final<- left_join(principal[!(principal$mois_sortie %in% c("201801","201802","201803")),], casting, "id_film")
+#   final<- left_join(final, real, "id_film")
+#   final<- left_join(final, acteurs, "id_film")
+#   final<- left_join(final, notes[!is.na(notes$id_film),], "id_film")
+# }

@@ -15,7 +15,7 @@ options(stringsAsFactors=F) # Pour importer les donnees quali en charactere et p
 ########## Source ##########
 # Permet de charger les fonctions definies dans le fichier
 
-source("02_casting_functions.R")
+source("02_voca_jap_functions.R")
 
 ########## Programme ##########
 
