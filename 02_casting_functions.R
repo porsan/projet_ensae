@@ -3,6 +3,7 @@ library(RCurl)
 library(rvest)
 library(dplyr)
 library(stringr)
+library(caret)
 #library(httr)
 
 ########## Fonction infos_casting() ########## 
@@ -370,7 +371,7 @@ traite_table_final <- function(final) {
 # Les arguments de la fonction sont :
 # data_dir - repertoire pour charger les fichiers csv
 
-construit_table_final <- function(data_dir) {
+construit_table_final <- function(data_dir, traitement = TRUE) {
    
   ########## Chargement des tables ###
   principal <- read.csv2(paste0(data_dir,"table_principal2.csv"), encoding = "latin1") # Avec specification de l'encodage des caracteres, ici latin1 
@@ -387,10 +388,208 @@ construit_table_final <- function(data_dir) {
   final <- left_join(final, personnes, "id_film")
   
   ########## Traitement sur la table final ###
-  final <- traite_table_final(final)
+  if(traitement) { final <- traite_table_final(final)}
 
   }
   
+########## Fonction charge_model_presse() ##########
+# Fonction charge_model_presse() permet de charger les modeles entrainer pour predire les notes presse.
+
+charge_model_presse <- function() {
+  load("rf_presse")
+  load("rpart_presse")
+  load("gradient_presse")
+  load("regression_presse")
+  load("regbackward_presse")
+  load("regforward_presse")
+  load("glmnet_presse")
+  load("svm_presse")
+  load("svmlineaire_presse")
+  load("xgboost_presse")
+  #load("extraTrees_presse")
+}
+
+########## Fonction charge_model_spectateur() ##########
+# Fonction charge_model_spectateur() permet de charger les modeles entraines pour predire les notes spectateur.
+
+charge_model_spectateur <- function() {
+  load("rf_spectateurs")
+  load("rpart_spectateurs")
+  load("gradient_spectateurs")
+  load("regression_spectateurs")
+  load("regbackward_spectateurs")
+  load("regforward_spectateurs")
+  load("glmnet_spectateurs")
+  load("svm_spectateurs")
+  load("svmlineaire_spectateurs")
+  load("xgboost_spectateurs")
+  #load("extraTrees_spectateurs")
+}
+
+
+########## Fonction eval_model_presse() ##########
+# Fonction eval_model_presse() permet d'evaluer les modeles entraines pour predire les notes presse.
+# Les arguments de la fonction sont :
+# final - la table final
+
+eval_model_presse <- function(final) {
+  
+# Chargement des modeles entraines pour predire les notes presse.
+load("rf_presse")
+load("rpart_presse")
+load("gradient_presse")
+load("regression_presse")
+load("regbackward_presse")
+load("regforward_presse")
+load("glmnet_presse")
+load("svm_presse")
+load("svmlineaire_presse")
+load("xgboost_presse")
+#load("extraTrees_presse")
+  
+# Jeux de donnees presse
+final_presse <- filter(final, !is.na(note_presse_moyenne))  %>% select(-one_of(c("note_spectateurs_moyenne")))
+# Suppression de la table final
+rm(final)
+  
+##### Decoupage test / validation #####
+
+# On fixe la graine
+set.seed(19)
+
+nb_films_presse <- nrow(final_presse)
+id_train_presse <- sample(1:nb_films_presse, nb_films_presse*(4/5))
+
+validation_presse <- final_presse[-id_train_presse,] %>% select(-one_of(c("titre", "url", "id_film")))
+x_validation_presse <- select(validation_presse, -one_of(c("note_presse_moyenne")))
+y_validation_presse <-  pull(validation_presse,note_presse_moyenne)
+
+# Prédictions sur échantillon de validation
+results_rf_presse <- predict(rf_presse, newdata = x_validation_presse )
+results_rpart_presse <- predict(rpart_presse, newdata = x_validation_presse )
+results_gradient_presse <- predict(gradient_presse, newdata = x_validation_presse )
+results_regression_presse <- predict(regression_presse, newdata = x_validation_presse )
+results_regforward_presse <- predict(regforward_presse, newdata = x_validation_presse )
+results_regbackward_presse <- predict(regbackward_presse, newdata = x_validation_presse )
+results_glmnet_presse <- predict(glmnet_presse, newdata = x_validation_presse )
+results_svm_presse <- predict(svm_presse, newdata = x_validation_presse )
+results_svmlineaire_presse <- predict(svmlineaire_presse, newdata = x_validation_presse )
+results_xgboost_presse <- predict(xgboost_presse, newdata = x_validation_presse )
+#results_extraTrees_presse <- predict(extraTrees_presse, newdata = x_validation_presse )
+
+# Mesures de performance
+performances_model_presse <- data.frame(model = c("Random Forest", "Arbre CART", "Gradient boosting", "Régression linéaire", "Régression lin. backw.", "Régression lin. forw.", "Régression ridge-lasso", "SVM", "SVM lineaire", "Extra G. boosting"))
+performances_model_presse <- data.frame(performances_model_presse, rbind(
+  postResample(pred = results_rf_presse, obs = validation_presse$note_presse_moyenne),
+  postResample(pred = results_rpart_presse, obs = validation_presse$note_presse_moyenne),
+  postResample(pred = results_gradient_presse, obs = validation_presse$note_presse_moyenne),
+  postResample(pred = results_regression_presse, obs = validation_presse$note_presse_moyenne),
+  postResample(pred = results_regforward_presse, obs = validation_presse$note_presse_moyenne),
+  postResample(pred = results_regbackward_presse, obs = validation_presse$note_presse_moyenne),
+  postResample(pred = results_glmnet_presse, obs = validation_presse$note_presse_moyenne),
+  postResample(pred = results_svm_presse, obs = validation_presse$note_presse_moyenne),
+  postResample(pred = results_svmlineaire_presse, obs = validation_presse$note_presse_moyenne),
+  postResample(pred = results_xgboost_presse, obs = validation_presse$note_presse_moyenne)))
+performances_model_presse$model <- factor(performances_model_presse$model)
+
+# Dataframe compilant les résultats des différents modèles sur l'échantillon de validation
+final_results <- data.frame( valeur_reelle = y_validation_presse,
+                             Random_Forest = results_rf_presse,
+                             Rpart = results_rpart_presse,
+                             Gradient = results_gradient_presse,
+                             Regression = results_regression_presse,
+                             Regression_backward = results_regbackward_presse, 
+                             Regression_penalisee = results_glmnet_presse,
+                             SVM = results_svm_presse,
+                             SVM_lineaire = results_svmlineaire_presse,
+                             Extra_Gradient = results_xgboost_presse
+)
+
+return(c(final_results, performances_model_presse))
+
+}
+
+########## Fonction eval_model_spectateur() ##########
+# Fonction eval_model_spectateur() permet d'evaluer les modeles entraines pour predire les notes spectateur.
+# Les arguments de la fonction sont :
+# final - la table final
+
+eval_model_spectateurs <- function(final) {
+  
+  # Chargement des modeles entraines pour predire les notes spectateur.
+  load("rf_spectateurs")
+  load("rpart_spectateurs")
+  load("gradient_spectateurs")
+  load("regression_spectateurs")
+  load("regbackward_spectateurs")
+  load("regforward_spectateurs")
+  load("glmnet_spectateurs")
+  load("svm_spectateurs")
+  load("svmlineaire_spectateurs")
+  load("xgboost_spectateurs")
+  #load("extraTrees_spectateurs")
+  
+  # Jeux de donnees spectateur
+  final_spectateurs <- filter(final, !is.na(note_spectateurs_moyenne))  %>% select(-one_of(c("note_presse_moyenne")))
+  # Suppression de la table final
+  rm(final)
+  
+  ##### Decoupage test / validation #####
+  
+  # On fixe la graine
+  set.seed(19)
+  
+  nb_films_spectateurs <- nrow(final_spectateurs)
+  id_train_spectateurs <- sample(1:nb_films_spectateurs, nb_films_spectateurs*(4/5))
+  
+  validation_spectateurs <- final_spectateurs[-id_train_spectateurs,] %>% select(-one_of(c("titre", "url", "id_film")))
+  x_validation_spectateurs <- select(validation_spectateurs, -one_of(c("note_spectateurs_moyenne")))
+  y_validation_spectateurs <-  pull(validation_spectateurs,note_spectateurs_moyenne)
+  
+  # Prédictions sur échantillon de validation
+  results_rf_spectateurs <- predict(rf_spectateurs, newdata = x_validation_spectateurs )
+  results_rpart_spectateurs <- predict(rpart_spectateurs, newdata = x_validation_spectateurs )
+  results_gradient_spectateurs <- predict(gradient_spectateurs, newdata = x_validation_spectateurs )
+  results_regression_spectateurs <- predict(regression_spectateurs, newdata = x_validation_spectateurs )
+  results_regforward_spectateurs <- predict(regforward_spectateurs, newdata = x_validation_spectateurs )
+  results_regbackward_spectateurs <- predict(regbackward_spectateurs, newdata = x_validation_spectateurs )
+  results_glmnet_spectateurs <- predict(glmnet_spectateurs, newdata = x_validation_spectateurs )
+  results_svm_spectateurs <- predict(svm_spectateurs, newdata = x_validation_spectateurs )
+  results_svmlineaire_spectateurs <- predict(svmlineaire_spectateurs, newdata = x_validation_spectateurs )
+  results_xgboost_spectateurs <- predict(xgboost_spectateurs, newdata = x_validation_spectateurs )
+  #results_extraTrees_spectateurs <- predict(extraTrees_spectateurs, newdata = x_validation_spectateurs )
+  
+  # Mesures de performance
+  performances_model_spectateurs <- data.frame(model = c("Random Forest", "Arbre CART", "Gradient boosting", "Régression linéaire", "Régression lin. backw.", "Régression lin. forw.", "Régression ridge-lasso", "SVM", "SVM lineaire", "Extra G. boosting"))
+  performances_model_spectateurs <- data.frame(performances_model_spectateurs, rbind(
+    postResample(pred = results_rf_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+    postResample(pred = results_rpart_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+    postResample(pred = results_gradient_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+    postResample(pred = results_regression_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+    postResample(pred = results_regforward_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+    postResample(pred = results_regbackward_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+    postResample(pred = results_glmnet_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+    postResample(pred = results_svm_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+    postResample(pred = results_svmlineaire_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+    postResample(pred = results_xgboost_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne)))
+  performances_model_spectateurs$model <- factor(performances_model_spectateurs$model)
+  
+  # Dataframe compilant les résultats des différents modèles sur l'échantillon de validation
+  final_results <- data.frame( valeur_reelle = y_validation_spectateurs,
+                               Random_Forest = results_rf_spectateurs,
+                               Rpart = results_rpart_spectateurs,
+                               Gradient = results_gradient_spectateurs,
+                               Regression = results_regression_spectateurs,
+                               Regression_backward = results_regbackward_spectateurs, 
+                               Regression_penalisee = results_glmnet_spectateurs,
+                               SVM = results_svm_spectateurs,
+                               SVM_lineaire = results_svmlineaire_spectateurs,
+                               Extra_Gradient = results_xgboost_spectateurs
+  )
+  
+  return(c(final_results, performances_model_spectateurs))
+  
+}
 ########## OLD Fonction construit_table_final <- function(data_dir) { ########## 
 #   
 #   ########## Chargement des tables ###
