@@ -4,7 +4,7 @@
 ############################################
 
 
-
+library(caret)
 setwd("/Data2/R programming/Projets/projet_ensae")
 
 ######### Lecture donnees ##########
@@ -14,7 +14,8 @@ source("02_casting_functions.R")
 data_dir <- "data/"
 
 ########## Pour travail en paralel ##########
-
+library(parallel)
+library(doParallel)
 detectCores() # nombre de coeurs sur la machine
 cluster <- makeCluster(detectCores() - 1) # par convention on laisse un coeur pour l'OS
 registerDoParallel(cluster)
@@ -30,6 +31,8 @@ final <- construit_table_final(data_dir)
 
 # Jeux de donnees presse
 final_presse_tmp <- final_presse <- filter(final, !is.na(note_presse_moyenne))  %>% select(-one_of(c("note_spectateurs_moyenne")))
+
+final_spectateur <- filter(final, !is.na(note_spectateurs_moyenne))  %>% select(-one_of(c("note_presse_moyenne")))
 
 # Suppression de la table final
 rm(final)
@@ -48,17 +51,25 @@ dim(final_presse) ## 11 138 lignes, 10 654 lignes avant 1990
 # On fixe la graine
 set.seed(19)
 
-nb_films_presse <- nrow(final_presse)
+nb_films_presse <- nrow(final_spectateur)
 id_train_presse <- sample(1:nb_films_presse, nb_films_presse*(4/5))
 #length(id_train_presse)/nb_films_presse
 
-train_presse <- final_presse[id_train_presse,] %>% select(-one_of(c("titre", "url", "id_film")))
-x_train_presse <-  select(train_presse, -one_of(c("note_presse_moyenne"))) 
-y_train_presse <- pull(train_presse,note_presse_moyenne) 
+train_presse <- final_spectateur[id_train_presse,] %>% select(-one_of(c("titre", "url", "id_film")))
+x_train_presse <-  select(train_presse, -one_of(c("note_spectateurs_moyenne"))) 
+y_train_presse <- pull(train_presse,note_spectateurs_moyenne) 
 
-validation_presse <- final_presse[-id_train_presse,] %>% select(-one_of(c("titre", "url", "id_film")))
-x_validation_presse <- select(validation_presse, -one_of(c("note_presse_moyenne")))
-y_validation_presse <-  pull(validation_presse,note_presse_moyenne)
+validation_presse <- final_spectateur[-id_train_presse,] %>% select(-one_of(c("titre", "url", "id_film")))
+x_validation_presse <- select(validation_presse, -one_of(c("note_spectateurs_moyenne")))
+y_validation_presse <-  pull(validation_presse,note_spectateurs_moyenne)
+
+train_spectateurs <- train_presse
+x_train_spectateurs <- x_train_presse
+y_train_spectateurs <- y_train_presse
+
+validation_spectateurs <- validation_presse
+x_validation_spectateurs <- x_validation_presse
+y_validation_spectateurs <- y_validation_presse
 
 
 load("rf_presse")
@@ -108,7 +119,7 @@ control <- trainControl(method = "cv", number = 5, allowParallel = TRUE)
 # Train des modèles pour note moyenne presse avec optimisation des paramètres
 
 grid <- expand.grid(mtry = c(sqrt(ncol(train_presse))))  # Paramètres : mtry (nb variables dans chaque échantillon)
-rf_presse <- train(note_presse_moyenne ~ ., data = train_presse, method = "rf", trControl = (trainControl(method = "oob", allowParallel = TRUE)), ntree = 500)
+rf_presse <- train(note_presse_moyenne ~ ., data = train_presse, method = "rf", trControl = (trainControl(method = "oob", allowParallel = TRUE)), ntree = 500, importance = TRUE)
 # rf_presse <- train(note_presse_moyenne ~ ., data = train_presse, method = "rf", trControl = (trainControl(method = "oob")), ntree = 500)
 rf_presse
 ggplot(rf_presse)
@@ -120,7 +131,7 @@ rpart_presse
 ggplot(rpart_presse)
 
 grid <- expand.grid(n.trees= c(100, 150, 200, 250, 275, 300, 350, 400), interaction.depth = c(3, 4, 5, 6), shrinkage = 0.1 , n.minobsinnode = 5) # Paramètres : n.trees, interaction.depth, shrinkage, n.minobsinnode
-gradient_presse <- train(note_presse_moyenne ~ ., data = train_presse, method = "gbm",  trControl = control, tuneGrid = grid)
+gradient_presse <- train(note_presse_moyenne ~ ., data = train_presse, method = "gbm",  trControl = control, tuneGrid = grid, importance = TRUE)
 gradient_presse # Opti : deph à 6, trees à 250
 ggplot(gradient_presse)
 
@@ -153,7 +164,7 @@ svmlineaire_presse # Opti : ?
 ggplot(svmlineaire_presse)
 
 grid <- expand.grid(nrounds = 50, lambda = 0.1, alpha = 0.01778279, eta = 0.3)  # Paramètres : (nb variables dans chaque échantillon)
-xgboost_presse <- train(note_presse_moyenne ~ ., data = train_presse, method = "xgbLinear", tuneLength = 10, trControl = control)
+xgboost_presse <- train(note_presse_moyenne ~ ., data = train_presse, method = "xgbLinear", tuneLength = 5, trControl = control)
 xgboost_presse # Opti : The final values used for the model were nrounds = 50, lambda = 0.1, alpha = 0.01778279 and eta = 0.3.
 ggplot(xgboost_presse)
 
@@ -182,7 +193,6 @@ save(svmlineaire_presse, file = "svmlineaire_presse")
 save(xgboost_presse, file = "xgboost_presse")
 save(xgboost_presse, file = "extraTrees_presse")
 
-
 # Prédictions sur échantillon de validation
 results_rf_presse <- predict(rf_presse, newdata = x_validation_presse )
 results_rpart_presse <- predict(rpart_presse, newdata = x_validation_presse )
@@ -205,7 +215,7 @@ results_aleatoire2 <- sample(2:4, replace = TRUE, length(results_glmnet_presse))
 varImp(gradient_presse)
 
 # Mesures de performance
-performances_model_presse <- data.frame(model = c("Random Forest", "Arbre CART", "Gradient boosting", "Régression linéaire", "Régression linéaire backward", "Régression linéaire Forward", "Régression ridge-lasso", "SVM"))
+performances_model_presse <- data.frame(model = c("Random Forest", "Arbre CART", "Gradient boosting", "Régression linéaire", "Régression lin. backw.", "Régression lin. forw.", "Régression ridge-lasso", "SVM", "SVM lineaire", "Extra G. boosting"))
 performances_model_presse <- data.frame(performances_model_presse, rbind(
 postResample(pred = results_rf_presse, obs = validation_presse$note_presse_moyenne),
 postResample(pred = results_rpart_presse, obs = validation_presse$note_presse_moyenne),
@@ -214,16 +224,15 @@ postResample(pred = results_regression_presse, obs = validation_presse$note_pres
 postResample(pred = results_regforward_presse, obs = validation_presse$note_presse_moyenne),
 postResample(pred = results_regbackward_presse, obs = validation_presse$note_presse_moyenne),
 postResample(pred = results_glmnet_presse, obs = validation_presse$note_presse_moyenne),
-postResample(pred = results_svm_presse, obs = validation_presse$note_presse_moyenne)))
+postResample(pred = results_svm_presse, obs = validation_presse$note_presse_moyenne),
+postResample(pred = results_svmlineaire_presse, obs = validation_presse$note_presse_moyenne),
+postResample(pred = results_xgboost_presse, obs = validation_presse$note_presse_moyenne)))
 performances_model_presse$model <- factor(performances_model_presse$model)
 
 # Ouf, les choix aléatoires sont VRAIMENT en dessous des modèles.... !
 1 - sum((y_validation_presse - results_aleatoire)^2) / sum((y_validation_presse - mean(y_validation_presse))^2)
 1 - sum((y_validation_presse - results_aleatoire2)^2) / sum((y_validation_presse - mean(y_validation_presse))^2)
 1 - sum((y_validation_presse - results_moyenne)^2) / sum((y_validation_presse - mean(y_validation_presse))^2)
-
-
-
 
 # Visualisation performances
 
@@ -252,7 +261,9 @@ final_results <- data.frame( valeur_reelle = y_validation_presse,
                              Regression = results_regression_presse,
                              Regression_backward = results_regbackward_presse, 
                              Regression_penalisee = results_glmnet_presse,
-                             SVM = results_svm_presse
+                             SVM = results_svm_presse,
+                             SVM_lineaire = results_svmlineaire_presse,
+                             Extra_Gradient = results_xgboost_presse
 )
 
 plot(y_validation_presse, results_gradient_presse)
@@ -291,7 +302,7 @@ ggplot(data2) + geom_jitter(aes(x=value, y = y_reel,color = variable )) +
 
 
 grid <- expand.grid(mtry = c(sqrt(ncol(train_spectateurs))))  # Paramètres : mtry (nb variables dans chaque échantillon)
-rf_spectateurs <- train(note_spectateurs_moyenne ~ ., data = train_spectateurs, method = "rf", trControl = (trainControl(method = "oob")), ntree = 500)
+rf_spectateurs <- train(note_spectateurs_moyenne ~ ., data = train_spectateurs, method = "rf", trControl = (trainControl(method = "oob")), ntree = 500, importance = TRUE)
 rf_spectateurs
 ggplot(rf_spectateurs)
 
@@ -306,7 +317,7 @@ rpart_spectateurs
 ggplot(rpart_spectateurs)
 
 grid <- expand.grid(n.trees= c(100, 150, 200, 250, 300, 350, 400), interaction.depth = c(3, 4, 5, 6), shrinkage = 0.1 , n.minobsinnode = 5) # Paramètres : n.trees, interaction.depth, shrinkage, n.minobsinnode
-gradient_spectateurs <- train(note_spectateurs_moyenne ~ ., data = train_spectateurs, method = "gbm",  trControl = control, tuneGrid = grid)
+gradient_spectateurs <- train(note_spectateurs_moyenne ~ ., data = train_spectateurs, method = "gbm",  trControl = control, tuneGrid = grid, importance = TRUE)
 gradient_spectateurs # Opti : deph à 6, trees à 250
 ggplot(gradient_spectateurs)
 
@@ -333,7 +344,15 @@ svm_spectateurs <- train(note_spectateurs_moyenne~ ., data = train_spectateurs, 
 svm_spectateurs # Opti : sigma = 0.001 et C = 1
 ggplot(svm_spectateurs)
 
+grid <- expand.grid(C = 10^(-3:2)) # Paramètres : fonction de cout uniquement
+svmlineaire_spectateurs <- train(note_spectateurs_moyenne ~ ., data = train_spectateurs, method = "svmLinear", tuneGrid = grid, trControl = control, preProc = c("center","scale") )
+svmlineaire_spectateurs # Opti : ?
+ggplot(svmlineaire_spectateurs)
 
+grid <- expand.grid(nrounds = 50, lambda = 0.1, alpha = 0.01778279, eta = 0.3)  # Paramètres : (nb variables dans chaque échantillon)
+xgboost_spectateurs <- train(note_spectateurs_moyenne ~ ., data = train_spectateurs, method = "xgbLinear", tuneLength = 10, trControl = control)
+xgboost_spectateurs # Opti : The final values used for the model were nrounds = 50, lambda = 0.1, alpha = 0.003162278 and eta = 0.3.
+ggplot(xgboost_spectateurs)
 
 
 
@@ -347,6 +366,8 @@ results_regforward_spectateurs <- predict(regforward_spectateurs, newdata = x_va
 results_regbackward_spectateurs <- predict(regbackward_spectateurs, newdata = x_validation_spectateurs )
 results_glmnet_spectateurs <- predict(glmnet_spectateurs, newdata = x_validation_spectateurs )
 results_svm_spectateurs <- predict(svm_spectateurs, newdata = x_validation_spectateurs )
+results_svmlineaire_spectateurs <- predict(svmlineaire_spectateurs, newdata = x_validation_spectateurs )
+results_xgboost_spectateurs <- predict(xgboost_spectateurs, newdata = x_validation_spectateurs )
 
 
 results_aleatoire <- rnorm(length(results_glmnet_spectateurs), mean = mean(train_spectateurs$note_spectateurs_moyenne), sd = sd(train_spectateurs$note_spectateurs_moyenne))
@@ -357,17 +378,20 @@ results_aleatoire2 <- sample(2:4, replace = TRUE, length(results_glmnet_spectate
 varImp(gradient_spectateurs)
 
 # Mesures de performance
-performances_model_spectateurs <- data.frame(model = c("Random Forest", "Random Forest Extreme", "Arbre CART", "Gradient boosting", "Régression linéaire", "Régression linéaire backward", "Régression linéaire Forward", "Régression ridge-lasso", "SVM"))
+performances_model_spectateurs <- data.frame(model = c("Random Forest", "Arbre CART", "Gradient boosting", "Régression linéaire", "Régression lin. backw.", "Régression lin. forw.", "Régression ridge-lasso", "SVM", "SVM lineaire", "Extra G. boosting"))
+#performances_model_spectateurs <- data.frame(model = c("Random Forest", "Random Forest Extreme", "Arbre CART", "Gradient boosting", "Régression linéaire", "Régression linéaire backward", "Régression linéaire Forward", "Régression ridge-lasso", "SVM"))
 performances_model_spectateurs <- data.frame(performances_model_spectateurs, rbind(
   postResample(pred = results_rf_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
-  postResample(pred = results_rfextreme_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+  #postResample(pred = results_rfextreme_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
   postResample(pred = results_rpart_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
   postResample(pred = results_gradient_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
   postResample(pred = results_regression_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
   postResample(pred = results_regforward_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
   postResample(pred = results_regbackward_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
   postResample(pred = results_glmnet_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
-  postResample(pred = results_svm_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne)))
+  postResample(pred = results_svm_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+  postResample(pred = results_svmlineaire_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne),
+  postResample(pred = results_xgboost_spectateurs, obs = validation_spectateurs$note_spectateurs_moyenne)))
 
 
 
@@ -375,13 +399,15 @@ performances_model_spectateurs <- data.frame(performances_model_spectateurs, rbi
 # Dataframe compilant les résultats des différents modèles sur l'échantillon de validation
 final_results <- data.frame( valeur_reelle = y_validation_spectateurs, 
                              Random_Forest = results_rf_spectateurs,
-                             Random_Forest_Extreme = results_rfextreme_spectateurs,
+                             #Random_Forest_Extreme = results_rfextreme_spectateurs,
                              Rpart = results_rpart_spectateurs,
                              Gradient = results_gradient_spectateurs,
                              Regression = results_regression_spectateurs,
                              Regression_backward = results_regbackward_spectateurs, 
                              Regression_penalisee = results_glmnet_spectateurs,
-                             SVM = results_svm_spectateurs
+                             SVM = results_svm_spectateurs,
+                             SVM_lineaire = results_svmlineaire_spectateurs,
+                             Extra_Gradient = results_xgboost_spectateurs
 )
 
 
@@ -394,7 +420,9 @@ save(regbackward_spectateurs, file = "regbackward_spectateurs")
 save(regforward_spectateurs, file = "regforward_spectateurs")
 save(glmnet_spectateurs, file = "glmnet_spectateurs")
 save(svm_spectateurs, file = "svm_spectateurs")
-
+save(svmlineaire_spectateurs, file = "svmlineaire_spectateurs")
+save(xgboost_spectateurs, file = "xgboost_spectateurs")
+save(xgboost_spectateurs, file = "extraTrees_spectateurs")
 
 # Visualisation performances
 
@@ -416,7 +444,7 @@ ggplot(performances_model_spectateurs) +
 
 
 # Visualisation des distributions obtenues : histogrammes
-data <- melt(final_results) 
+data <- reshape2::melt(final_results) 
 ggplot(data) + geom_histogram(aes(x=value, fill = variable), bins = 30) + 
   facet_wrap(~variable, ncol = 2) +
   labs(title ="Distribution des notes spectateurs selon le modèle choisi", subtitle = "Echantillon de validation") +
@@ -427,7 +455,7 @@ ggplot(data) + geom_boxplot(aes(x=variable, y = value, color = variable)) +
   labs(title ="Distribution des notes presse selon le modèle choisi", subtitle = "Echantillon de validation") +
   theme_minimal() + theme(legend.position = "null")
 
-]
+
 # Visualisation des distributions obtenues : boxplot (à peu près la même chose mais présenté de façon différente)
 ggplot(data) + geom_boxplot(aes(x=variable, y = value, fill= variable)) +
   labs(title ="Distribution des notes spectateurs selon le modèle choisi", subtitle = "Echantillon de validation") +
